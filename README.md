@@ -1,0 +1,1 @@
+# lazy-warriors-farm-auto
