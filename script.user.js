@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lazy Warriors Farm Auto
 // @namespace    local.at-sp.notification-monitor
-// @version      2.78.43
+// @version      2.78.47
 // @description  Automates farm tasks, neighbor help, games, restaurant, ranch, and mythical beast actions.
 // @match        https://at-sp.ssvhue.work/*
 // @updateURL    https://raw.githubusercontent.com/thanhnguyenduyy/lazy-warriors-farm-auto/refs/heads/main/script.meta.js
@@ -138,6 +138,7 @@
   const RANCH_INITIAL_DELAY_MS = 30_000;
   const HONEY_TASK_PATTERN = /\d+\s*tổ ong có mật/i;
   const RIPE_FIELD_TASK_PATTERN = /\d+\s*ô ruộng chín/i;
+  const FIELD_CARE_TASK_PATTERN = /\d+\s*ô ruộng cần chăm/i;
   const ANIMAL_TASK_PATTERN = /\d+\s*con thú chờ thu/i;
   const ANIMAL_CARE_TASK_PATTERN = /\d+\s*con thú đói\s*\/\s*khát/i;
   const MYTHICAL_HUNGRY_TASK_PATTERN = /\d+\s*ổ đói/i;
@@ -425,6 +426,8 @@
   ];
   const ACTION_CLICK_DELAY_MS = 500;
   const MAX_ANIMAL_ACTION_CLICKS = 100;
+  const MACHINE_RESTART_DELAY_MS = 3_000;
+  const MACHINE_RECIPE_READY_TIMEOUT_MS = 10_000;
   let isRunning = false;
   let runGeneration = 0;
   let activeCheckGeneration = null;
@@ -583,7 +586,12 @@
 
   function getTaskFeature(message) {
     if (HONEY_TASK_PATTERN.test(message)) return "bees";
-    if (RIPE_FIELD_TASK_PATTERN.test(message)) return "field";
+    if (
+      RIPE_FIELD_TASK_PATTERN.test(message) ||
+      FIELD_CARE_TASK_PATTERN.test(message)
+    ) {
+      return "field";
+    }
     if (
       ANIMAL_TASK_PATTERN.test(message) ||
       ANIMAL_CARE_TASK_PATTERN.test(message) ||
@@ -1614,7 +1622,7 @@
             card.querySelectorAll("button.btn.primary:not(:disabled)"),
           ).some(isVisible),
         ),
-      3_000,
+      MACHINE_RECIPE_READY_TIMEOUT_MS,
       generation,
     );
     if (!shouldContinue(generation)) return;
@@ -1839,6 +1847,44 @@
       ),
     ];
     return labels.join(" ");
+  }
+
+  function getAvailableFieldPestPlot() {
+    for (const pageDocument of getPageDocuments()) {
+      const plots = pageDocument.querySelectorAll(".fm-field .fm-plot");
+      for (const plot of plots) {
+        const description = [
+          plot.getAttribute("aria-label") ?? "",
+          plot.getAttribute("title") ?? "",
+          plot.textContent ?? "",
+        ].join(" ");
+        if (
+          !plot.disabled &&
+          isVisible(plot) &&
+          (plot.classList.contains("care-pest") || /sâu/i.test(description))
+        ) {
+          return plot;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  async function handleFieldPestTask(generation) {
+    const pestPlot = await waitFor(getAvailableFieldPestPlot, 3_000, generation);
+    if (!shouldContinue(generation)) return;
+    if (!pestPlot) {
+      console.warn("[AT-SP] Không tìm thấy ô ruộng có sâu sau khi mở nhiệm vụ.");
+      return;
+    }
+
+    const plotLabel =
+      pestPlot.getAttribute("aria-label")?.trim() ||
+      pestPlot.textContent.trim() ||
+      "Ô ruộng có sâu";
+    pestPlot.click();
+    console.info(`[AT-SP] Đã mở ô ruộng có sâu: ${plotLabel}.`);
   }
 
   function getVietnamMinuteOfDay() {
@@ -2259,6 +2305,11 @@
       if (!shouldContinue(generation)) return;
       taskRow.click();
 
+      if (FIELD_CARE_TASK_PATTERN.test(taskName)) {
+        await handleFieldPestTask(generation);
+        return;
+      }
+
       if (MYTHICAL_HUNGRY_TASK_PATTERN.test(taskName)) {
         if (selectedMythicalBeast === NO_SELECTION_OPTION) {
           console.info("[AT-SP] Thần thú được đặt thành Không chọn; bỏ qua cho ăn.");
@@ -2470,6 +2521,7 @@
         console.info("[AT-SP] Đã bấm nút Lấy hết của máy.");
         closeNotificationDialog(dialog);
         dialog = null;
+        if (!(await delay(MACHINE_RESTART_DELAY_MS, generation))) return;
         await startAvailableMachineRecipes(generation);
         return;
       }
@@ -3386,6 +3438,48 @@
   panelTitle.style.fontSize = "12px";
   panelHeading.append(panelTitle);
 
+  const updateLink = document.createElement("a");
+  updateLink.href =
+    "https://raw.githubusercontent.com/thanhnguyenduyy/lazy-warriors-farm-auto/refs/heads/main/script.user.js";
+  updateLink.target = "_blank";
+  updateLink.rel = "noopener noreferrer";
+  updateLink.setAttribute("aria-label", "Cập nhật userscript");
+  updateLink.title = "Cập nhật userscript";
+  Object.assign(updateLink.style, {
+    display: "grid",
+    placeItems: "center",
+    flex: "0 0 27px",
+    width: "27px",
+    height: "27px",
+    color: "#60816a",
+    textDecoration: "none",
+    cursor: "pointer",
+  });
+  const updateIcon = document.createElementNS(
+    "http://www.w3.org/2000/svg",
+    "svg",
+  );
+  updateIcon.setAttribute("viewBox", "0 0 24 24");
+  updateIcon.setAttribute("fill", "none");
+  updateIcon.setAttribute("stroke", "currentColor");
+  updateIcon.setAttribute("stroke-width", "2");
+  updateIcon.setAttribute("stroke-linecap", "round");
+  updateIcon.setAttribute("stroke-linejoin", "round");
+  updateIcon.setAttribute("aria-hidden", "true");
+  for (const pathData of [
+    "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4",
+    "m7 10 5 5 5-5",
+    "M12 15V3",
+  ]) {
+    const path = document.createElementNS(
+      "http://www.w3.org/2000/svg",
+      "path",
+    );
+    path.setAttribute("d", pathData);
+    updateIcon.append(path);
+  }
+  updateLink.append(updateIcon);
+
   const expandButton = document.createElement("button");
   expandButton.type = "button";
   expandButton.textContent = "⭐";
@@ -3406,7 +3500,7 @@
     cursor: "pointer",
     lineHeight: "1",
   });
-  panelHeader.append(dragIcon, panelHeading, expandButton);
+  panelHeader.append(dragIcon, panelHeading, updateLink, expandButton);
 
   const panelContent = document.createElement("div");
   Object.assign(panelContent.style, {
