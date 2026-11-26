@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lazy Warriors Farm Auto
 // @namespace    local.at-sp.notification-monitor
-// @version      2.78.47
+// @version      2.78.49
 // @description  Automates farm tasks, neighbor help, games, restaurant, ranch, and mythical beast actions.
 // @match        https://at-sp.ssvhue.work/*
 // @updateURL    https://raw.githubusercontent.com/thanhnguyenduyy/lazy-warriors-farm-auto/refs/heads/main/script.meta.js
@@ -376,6 +376,7 @@
       features: [
         { key: "neighborWater", label: "Tưới nước giúp" },
         { key: "neighborHumidity", label: "Phun ẩm giúp" },
+        { key: "neighborPest", label: "Bắt sâu giúp" },
         { key: "neighborWeed", label: "Nhổ cỏ giúp" },
         { key: "neighborPrune", label: "Tỉa cành giúp" },
         { key: "neighborCompost", label: "Ủ phân giúp" },
@@ -1948,6 +1949,37 @@
     return null;
   }
 
+  function getAvailableNeighborPestPlot(attemptedPlotKeys) {
+    if (!isFeatureEnabled("neighborPest")) return null;
+
+    for (const [documentIndex, pageDocument] of getPageDocuments().entries()) {
+      const fields = pageDocument.querySelectorAll(".fm-field");
+      for (const [fieldIndex, field] of Array.from(fields).entries()) {
+        const plots = field.querySelectorAll(".fm-plot.help");
+        for (const [plotIndex, plot] of Array.from(plots).entries()) {
+          const plotKey = [
+            documentIndex,
+            fieldIndex,
+            plot.getAttribute("data-plot") ??
+              plot.getAttribute("aria-label") ??
+              plotIndex,
+          ].join(":");
+          if (
+            !attemptedPlotKeys.has(plotKey) &&
+            !plot.disabled &&
+            isVisible(plot) &&
+            (plot.classList.contains("care-pest") ||
+              /sâu/i.test(getNeighborWaterPlotDescription(plot)))
+          ) {
+            return { plot, plotKey };
+          }
+        }
+      }
+    }
+
+    return null;
+  }
+
   function getAvailableNeighborFeedTargets() {
     const targets = [];
     for (const pageDocument of getPageDocuments()) {
@@ -2163,6 +2195,41 @@
         } else {
           console.warn(
             `[AT-SP] Ô ruộng "${actionLabel}" chưa cập nhật sau khi bấm; bỏ qua để tránh bấm lặp.`,
+          );
+        }
+        activeFeatureKey = null;
+        if (!(await delay(ACTION_CLICK_DELAY_MS, generation))) return;
+      }
+
+      while (shouldContinueNeighborHelp(generation)) {
+        const availablePlot =
+          getAvailableNeighborPestPlot(attemptedPlotKeys);
+        if (!availablePlot) break;
+
+        const { plot, plotKey } = availablePlot;
+        const actionLabel = getNeighborWaterPlotDescription(plot).trim();
+        attemptedPlotKeys.add(plotKey);
+        activeFeatureKey = "neighborPest";
+        plot.click();
+
+        const actionUpdated = await waitFor(
+          () =>
+            !plot.isConnected ||
+            plot.disabled ||
+            !plot.classList.contains("help") ||
+            !plot.classList.contains("care-pest"),
+          2_500,
+          generation,
+        );
+        if (!shouldContinueNeighborHelp(generation)) return;
+        if (actionUpdated) {
+          helpedCount += 1;
+          console.info(
+            `[AT-SP] Đã bắt sâu giúp ${neighborName || "hàng xóm"} tại ô ruộng: ${actionLabel}.`,
+          );
+        } else {
+          console.warn(
+            `[AT-SP] Ô ruộng "${actionLabel}" chưa cập nhật sau khi bắt sâu; bỏ qua để tránh bấm lặp.`,
           );
         }
         activeFeatureKey = null;
@@ -3448,9 +3515,9 @@
   Object.assign(updateLink.style, {
     display: "grid",
     placeItems: "center",
-    flex: "0 0 27px",
-    width: "27px",
-    height: "27px",
+    flex: "0 0 22px",
+    width: "22px",
+    height: "22px",
     color: "#60816a",
     textDecoration: "none",
     cursor: "pointer",
@@ -3459,6 +3526,8 @@
     "http://www.w3.org/2000/svg",
     "svg",
   );
+  updateIcon.setAttribute("width", "16");
+  updateIcon.setAttribute("height", "16");
   updateIcon.setAttribute("viewBox", "0 0 24 24");
   updateIcon.setAttribute("fill", "none");
   updateIcon.setAttribute("stroke", "currentColor");
@@ -4468,9 +4537,9 @@
       "z-index": "2147483647",
       display: "grid",
       "box-sizing": "border-box",
-      width: expanded ? "min(270px, calc(100vw - 72px))" : "22px",
-      height: expanded ? "auto" : "22px",
-      "max-height": expanded ? "calc(100vh - 16px)" : "22px",
+      width: expanded ? "min(270px, calc(100vw - 72px))" : "48px",
+      height: expanded ? "auto" : "24px",
+      "max-height": expanded ? "calc(100vh - 16px)" : "24px",
       gap: expanded ? "7px" : "0",
       padding: expanded ? "5px" : "0",
       border: expanded ? "1px solid #dce8dd" : "0",
@@ -4485,9 +4554,9 @@
       display: "flex",
       "box-sizing": "border-box",
       width: "100%",
-      "min-height": expanded ? "28px" : "22px",
-      height: expanded ? "28px" : "22px",
-      gap: expanded ? "6px" : "0",
+      "min-height": expanded ? "28px" : "24px",
+      height: expanded ? "28px" : "24px",
+      gap: expanded ? "6px" : "2px",
       "justify-content": expanded ? "initial" : "center",
       "border-bottom": expanded ? "1px solid #e4ece4" : "0",
     });
@@ -4499,6 +4568,21 @@
     });
     setImportantStyles(panelHeading, {
       display: expanded ? "flex" : "none",
+    });
+    setImportantStyles(updateLink, {
+      display: "grid",
+      "place-items": "center",
+      flex: "0 0 22px",
+      width: "22px",
+      height: "22px",
+      "min-width": "22px",
+      "max-width": "22px",
+      "box-sizing": "border-box",
+      margin: "0",
+      padding: "0",
+      color: "#60816a",
+      "text-decoration": "none",
+      cursor: "pointer",
     });
     setImportantStyles(expandButton, {
       appearance: "none",
