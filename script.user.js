@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lazy Warriors Farm Auto
 // @namespace    local.at-sp.notification-monitor
-// @version      2.78.55
+// @version      2.78.56
 // @description  Automates farm tasks, neighbor help, games, restaurant, ranch, and mythical beast actions.
 // @match        https://at-sp.ssvhue.work/*
 // @updateURL    https://raw.githubusercontent.com/thanhnguyenduyy/lazy-warriors-farm-auto/refs/heads/main/script.meta.js
@@ -139,6 +139,7 @@
   const HONEY_TASK_PATTERN = /\d+\s*tổ ong có mật/i;
   const RIPE_FIELD_TASK_PATTERN = /\d+\s*ô ruộng chín/i;
   const FIELD_CARE_TASK_PATTERN = /\d+\s*ô ruộng cần chăm/i;
+  const HOME_FIELD_CARE_FEATURE_KEY = "homeFieldCare";
   const ANIMAL_TASK_PATTERN = /\d+\s*con thú chờ thu/i;
   const ANIMAL_CARE_TASK_PATTERN = /\d+\s*con thú đói\s*\/\s*khát/i;
   const MYTHICAL_HUNGRY_TASK_PATTERN = /\d+\s*ổ đói/i;
@@ -349,6 +350,7 @@
         { key: "medicine", label: "Thuốc" },
         { key: "homeWeed", label: "Nhổ cỏ" },
         { key: "homePest", label: "Bắt Sâu" },
+        { key: "homeWater", label: "Tưới ruộng" },
         { key: "homeSilkwormFeed", label: "Cho Tằm ăn" },
         { key: "forest", label: "Rừng" },
       ],
@@ -586,13 +588,18 @@
   ]);
 
   function isFeatureEnabled(key) {
+    if (key === HOME_FIELD_CARE_FEATURE_KEY) {
+      return isFeatureEnabled("homePest") || isFeatureEnabled("homeWater");
+    }
     return enabledFeatures[key] !== false;
   }
 
   function getTaskFeature(message) {
     if (HONEY_TASK_PATTERN.test(message)) return "bees";
     if (RIPE_FIELD_TASK_PATTERN.test(message)) return "field";
-    if (FIELD_CARE_TASK_PATTERN.test(message)) return "homePest";
+    if (FIELD_CARE_TASK_PATTERN.test(message)) {
+      return HOME_FIELD_CARE_FEATURE_KEY;
+    }
     if (
       ANIMAL_TASK_PATTERN.test(message) ||
       ANIMAL_CARE_TASK_PATTERN.test(message) ||
@@ -1851,21 +1858,37 @@
     return labels.join(" ");
   }
 
-  function getAvailableFieldPestPlot() {
-    for (const pageDocument of getPageDocuments()) {
-      const plots = pageDocument.querySelectorAll(".fm-field .fm-plot");
-      for (const plot of plots) {
-        const description = [
-          plot.getAttribute("aria-label") ?? "",
-          plot.getAttribute("title") ?? "",
-          plot.textContent ?? "",
-        ].join(" ");
-        if (
-          !plot.disabled &&
-          isVisible(plot) &&
-          (plot.classList.contains("care-pest") || /sâu/i.test(description))
-        ) {
-          return plot;
+  function getAvailableHomeFieldCarePlot(
+    attemptedPlotKeys,
+    careClass,
+    descriptionPattern,
+  ) {
+    for (const [documentIndex, pageDocument] of getPageDocuments().entries()) {
+      const fields = pageDocument.querySelectorAll(".fm-field");
+      for (const [fieldIndex, field] of Array.from(fields).entries()) {
+        const plots = Array.from(field.querySelectorAll(".fm-plot"));
+        for (const [plotIndex, plot] of plots.entries()) {
+          const plotKey = [
+            documentIndex,
+            fieldIndex,
+            plot.getAttribute("data-plot") ??
+              plot.getAttribute("aria-label") ??
+              plotIndex,
+          ].join(":");
+          const description = [
+            plot.getAttribute("aria-label") ?? "",
+            plot.getAttribute("title") ?? "",
+            plot.textContent ?? "",
+          ].join(" ");
+          if (
+            !attemptedPlotKeys.has(plotKey) &&
+            !plot.disabled &&
+            isVisible(plot) &&
+            (plot.classList.contains(careClass) ||
+              descriptionPattern.test(description))
+          ) {
+            return { plot, plotKey, description };
+          }
         }
       }
     }
@@ -1873,20 +1896,108 @@
     return null;
   }
 
-  async function handleFieldPestTask(generation) {
-    const pestPlot = await waitFor(getAvailableFieldPestPlot, 3_000, generation);
-    if (!shouldContinue(generation)) return;
-    if (!pestPlot) {
-      console.warn("[AT-SP] Không tìm thấy ô ruộng có sâu sau khi mở nhiệm vụ.");
+  async function handleHomeFieldCareAction(
+    generation,
+    featureKey,
+    careClass,
+    descriptionPattern,
+    actionLabel,
+  ) {
+    const attemptedPlotKeys = new Set();
+    activeFeatureKey = featureKey;
+    let availablePlot = await waitFor(
+      () =>
+        getAvailableHomeFieldCarePlot(
+          attemptedPlotKeys,
+          careClass,
+          descriptionPattern,
+        ),
+      3_000,
+      generation,
+    );
+    if (!shouldContinue(generation)) {
+      activeFeatureKey = HOME_FIELD_CARE_FEATURE_KEY;
+      return;
+    }
+    if (!availablePlot) {
+      activeFeatureKey = HOME_FIELD_CARE_FEATURE_KEY;
+      console.info(`[AT-SP] Không tìm thấy ô cần ${actionLabel} trong vườn nhà.`);
       return;
     }
 
-    const plotLabel =
-      pestPlot.getAttribute("aria-label")?.trim() ||
-      pestPlot.textContent.trim() ||
-      "Ô ruộng có sâu";
-    pestPlot.click();
-    console.info(`[AT-SP] Đã mở ô ruộng có sâu: ${plotLabel}.`);
+    let completedCount = 0;
+    while (availablePlot && shouldContinue(generation)) {
+      const { plot, plotKey, description } = availablePlot;
+      attemptedPlotKeys.add(plotKey);
+      plot.click();
+
+      const actionUpdated = await waitFor(
+        () =>
+          !plot.isConnected ||
+          plot.disabled ||
+          !plot.classList.contains(careClass) ||
+          !descriptionPattern.test(
+            [
+              plot.getAttribute("aria-label") ?? "",
+              plot.getAttribute("title") ?? "",
+              plot.textContent ?? "",
+            ].join(" "),
+          ),
+        2_500,
+        generation,
+      );
+      if (!shouldContinue(generation)) {
+        activeFeatureKey = HOME_FIELD_CARE_FEATURE_KEY;
+        return;
+      }
+      if (actionUpdated) {
+        completedCount += 1;
+        console.info(`[AT-SP] Đã ${actionLabel}: ${description.trim()}.`);
+      } else {
+        console.warn(
+          `[AT-SP] Ô "${description.trim()}" chưa cập nhật sau khi ${actionLabel}; bỏ qua để tránh bấm lặp.`,
+        );
+      }
+
+      activeFeatureKey = HOME_FIELD_CARE_FEATURE_KEY;
+      if (!(await delay(ACTION_CLICK_DELAY_MS, generation))) return;
+      activeFeatureKey = featureKey;
+      availablePlot = getAvailableHomeFieldCarePlot(
+        attemptedPlotKeys,
+        careClass,
+        descriptionPattern,
+      );
+    }
+
+    activeFeatureKey = HOME_FIELD_CARE_FEATURE_KEY;
+    console.info(
+      `[AT-SP] Đã ${actionLabel} ở ${completedCount} ô trong vườn nhà.`,
+    );
+  }
+
+  async function handleHomeFieldCareTask(generation) {
+    if (isFeatureEnabled("homeWater")) {
+      await handleHomeFieldCareAction(
+        generation,
+        "homeWater",
+        "care-thirsty",
+        /khát|tưới/i,
+        "tưới ruộng",
+      );
+    }
+    if (
+      shouldContinue(generation) &&
+      isFeatureEnabled("homePest")
+    ) {
+      await handleHomeFieldCareAction(
+        generation,
+        "homePest",
+        "care-pest",
+        /sâu/i,
+        "bắt sâu",
+      );
+    }
+    activeFeatureKey = HOME_FIELD_CARE_FEATURE_KEY;
   }
 
   function getAvailableHomeTrayCell(attemptedCellKeys, descriptionPattern) {
@@ -2466,7 +2577,7 @@
       taskRow.click();
 
       if (FIELD_CARE_TASK_PATTERN.test(taskName)) {
-        await handleFieldPestTask(generation);
+        await handleHomeFieldCareTask(generation);
         return;
       }
 
