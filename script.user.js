@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lazy Warriors Farm Auto
 // @namespace    local.at-sp.notification-monitor
-// @version      2.78.65
+// @version      2.78.66
 // @description  Automates farm tasks, neighbor help, games, restaurant, ranch, mythical beast, and immortal realm actions.
 // @match        https://at-sp.ssvhue.work/*
 // @updateURL    https://raw.githubusercontent.com/thanhnguyenduyy/lazy-warriors-farm-auto/refs/heads/main/script.meta.js
@@ -137,6 +137,8 @@
   const RANCH_CHECK_INTERVAL_MS = 60_000;
   const RANCH_INITIAL_DELAY_MS = 30_000;
   const IMMORTAL_FURNACE_CHECK_INTERVAL_MS = 30 * 60 * 1_000;
+  const IMMORTAL_DRINK_COOLDOWN_MS = 60 * 60 * 1_000;
+  const IMMORTAL_ACTIVE_FEATURE_KEY = "immortalAutomation";
   const HONEY_TASK_PATTERN = /\d+\s*tổ ong có mật/i;
   const RIPE_FIELD_TASK_PATTERN = /\d+\s*ô ruộng chín/i;
   const FIELD_CARE_TASK_PATTERN = /\d+\s*ô ruộng cần chăm/i;
@@ -330,6 +332,7 @@
   const EXPLORATION_PLACE_SECOND_STORAGE_KEY = "at-sp.exploration-place-second";
   const EXPLORATION_PLACE_THIRD_STORAGE_KEY = "at-sp.exploration-place-third";
   const CONTROL_POSITION_STORAGE_KEY = "at-sp.control-position-v3";
+  const IMMORTAL_DRINK_TIMESTAMP_STORAGE_KEY = "at-sp.immortal.lastDrinkAt";
   const FEATURE_TOGGLE_STORAGE_PREFIX = "at-sp.feature.";
   const AUTOMATION_SCHEDULE_TOGGLE_KEY = "automationSchedule";
   const NEIGHBOR_HELP_ALLOWLIST_TOGGLE_KEY = "neighborHelpAllowlist";
@@ -396,6 +399,7 @@
       icon: "☁️",
       features: [
         { key: "immortalFurnace", label: "Thông báo lò đan (30 phút)" },
+        { key: "immortalDrink", label: "Uống đan dược (1 giờ)" },
       ],
     },
     {
@@ -474,6 +478,7 @@
   let ranchStartTimeoutId = null;
   let immortalFurnaceIntervalId = null;
   let isImmortalFurnaceCheckActive = false;
+  let lastImmortalDrinkAt = 0;
   let isRestaurantCheckActive = false;
   let isRanchCheckActive = false;
   let isNeighborCheckActive = false;
@@ -575,6 +580,26 @@
       console.warn(`[AT-SP] Không lưu được tùy chọn (${key}).`, error);
     }
   }
+
+  function readStoredTimestamp(key) {
+    try {
+      const stored = window.localStorage.getItem(key);
+      if (stored === null) return 0;
+      const timestamp = Number(stored);
+      if (!Number.isFinite(timestamp) || timestamp < 0) {
+        console.warn(`[AT-SP] Thời điểm đã lưu không hợp lệ (${key}).`);
+        return 0;
+      }
+      return timestamp;
+    } catch (error) {
+      console.warn(`[AT-SP] Không đọc được thời điểm đã lưu (${key}).`, error);
+      return 0;
+    }
+  }
+
+  lastImmortalDrinkAt = readStoredTimestamp(
+    IMMORTAL_DRINK_TIMESTAMP_STORAGE_KEY,
+  );
 
   function readStoredToggle(
     key,
@@ -816,11 +841,10 @@
   }
 
   function shouldContinue(generation) {
-    if (activeFeatureKey === "immortalFurnace") {
+    if (activeFeatureKey === IMMORTAL_ACTIVE_FEATURE_KEY) {
       if (
         generation !== immortalRunGeneration ||
-        (!isImmortalRunning && !isImmortalManualRun) ||
-        (!isImmortalManualRun && !isFeatureEnabled("immortalFurnace"))
+        (!isImmortalRunning && !isImmortalManualRun)
       ) {
         return false;
       }
@@ -3749,13 +3773,94 @@
     }
   }
 
+  async function drinkImmortalMedicine(generation) {
+    if (!isFeatureEnabled("immortalDrink")) return;
+    if (Date.now() - lastImmortalDrinkAt < IMMORTAL_DRINK_COOLDOWN_MS) return;
+
+    const characterTab = findVisibleMatching(
+      "nav.xs-tabs[aria-label='Tiên giới'] button.xs-tab",
+      (button) =>
+        button.textContent.replace(/\s+/g, " ").trim() === "Nhân vật",
+    );
+    if (!characterTab) {
+      console.warn("[AT-SP] Không tìm thấy tab Nhân vật để kiểm tra đan dược.");
+      return;
+    }
+    if (!characterTab.classList.contains("on")) {
+      characterTab.click();
+      const characterTabReady = await waitFor(
+        () => characterTab.classList.contains("on"),
+        3_000,
+        generation,
+      );
+      if (!characterTabReady || !shouldContinue(generation)) return;
+    }
+
+    const bagTab = findVisibleMatching(
+      ".xs-seg[role='tablist'] button.xs-seg-b[role='tab']",
+      (button) => button.textContent.trim() === "Túi",
+    );
+    if (!bagTab) {
+      console.warn("[AT-SP] Không tìm thấy tab Túi để kiểm tra đan dược.");
+      return;
+    }
+    if (bagTab.getAttribute("aria-selected") !== "true") {
+      bagTab.click();
+      const bagTabReady = await waitFor(
+        () => bagTab.getAttribute("aria-selected") === "true",
+        3_000,
+        generation,
+      );
+      if (!bagTabReady || !shouldContinue(generation)) return;
+    }
+
+    const medicinePanel = await waitFor(
+      () =>
+        findVisibleMatching("section.xs-panel", (panel) => {
+          const title = panel.querySelector(".xs-title")?.textContent.trim();
+          return title === "Đan dược";
+        }),
+      3_000,
+      generation,
+    );
+    if (!medicinePanel || !shouldContinue(generation)) {
+      console.warn("[AT-SP] Không tìm thấy mục Đan dược trong Túi.");
+      return;
+    }
+
+    const drinkButton = Array.from(
+      medicinePanel.querySelectorAll(".xs-row button"),
+    ).find(
+      (button) =>
+        button.textContent.trim() === "Uống" &&
+        !button.disabled &&
+        isVisible(button),
+    );
+    if (!drinkButton) {
+      console.info("[AT-SP] Tiên giới: không có đan dược khả dụng để uống.");
+      return;
+    }
+
+    drinkButton.click();
+    lastImmortalDrinkAt = Date.now();
+    storeOption(
+      IMMORTAL_DRINK_TIMESTAMP_STORAGE_KEY,
+      String(lastImmortalDrinkAt),
+    );
+    console.info("[AT-SP] Tiên giới: đã uống đan dược; lần uống tiếp theo sau 1 giờ.");
+    await delay(ACTION_CLICK_DELAY_MS, generation);
+  }
+
   async function checkImmortalFurnaceNotifications(generation, manual = false) {
+    const hasEnabledImmortalTask =
+      isFeatureEnabled("immortalFurnace") ||
+      isFeatureEnabled("immortalDrink");
     if (
       (manual
         ? !isImmortalManualRun || generation !== immortalRunGeneration
         : !isImmortalRunning ||
           generation !== immortalRunGeneration ||
-          !isFeatureEnabled("immortalFurnace")) ||
+          !hasEnabledImmortalTask) ||
       (!manual && isImmortalManualRun) ||
       isImmortalFurnaceCheckActive ||
       isPriorityCycleActive ||
@@ -3771,9 +3876,12 @@
     }
 
     isImmortalFurnaceCheckActive = true;
-    activeFeatureKey = "immortalFurnace";
+    activeFeatureKey = IMMORTAL_ACTIVE_FEATURE_KEY;
 
     try {
+      console.info(
+        `[AT-SP] Tiên giới: bắt đầu lượt ${manual ? "Chạy ngay" : "tự động"}.`,
+      );
       let immortalNav = findVisible("nav.xs-tabs[aria-label='Tiên giới']");
       if (immortalNav) {
         const returnButton = findVisibleMatching(
@@ -3847,6 +3955,13 @@
         return;
       }
 
+      await drinkImmortalMedicine(generation);
+      if (!shouldContinue(generation)) return;
+      if (!isFeatureEnabled("immortalFurnace")) {
+        console.info("[AT-SP] Tiên giới: bỏ qua thông báo lò đan vì tùy chọn đang tắt.");
+        return;
+      }
+
       const bellButton = findVisibleMatching(
         "button.xs-ib[aria-label^='Thông báo']",
         (button) => !button.disabled,
@@ -3880,6 +3995,7 @@
         ),
       );
       if (!furnaceNotification) {
+        console.info("[AT-SP] Tiên giới: hiện không có thông báo lò đan cần xử lý.");
         const closeButton = Array.from(
           notificationForm.querySelectorAll(".dialog-actions button"),
         ).find(
@@ -3923,16 +4039,20 @@
       console.info("[AT-SP] Tiên giới: đã bấm Mở lò từ thông báo.");
       await delay(ACTION_CLICK_DELAY_MS, generation);
     } finally {
-      if (shouldContinue(generation)) {
-        const returnButton = findVisibleMatching(
-          "button[aria-label='Về Hạ giới']",
-          (button) => !button.disabled,
+      const returnButton = findVisibleMatching(
+        "button[aria-label='Về Hạ giới']",
+        (button) => !button.disabled,
+      );
+      returnButton?.click();
+      if (returnButton) {
+        await new Promise((resolve) =>
+          window.setTimeout(resolve, ACTION_CLICK_DELAY_MS),
         );
-        returnButton?.click();
-        if (returnButton) await delay(ACTION_CLICK_DELAY_MS, generation);
       }
       isImmortalFurnaceCheckActive = false;
-      if (activeFeatureKey === "immortalFurnace") activeFeatureKey = null;
+      if (activeFeatureKey === IMMORTAL_ACTIVE_FEATURE_KEY) {
+        activeFeatureKey = null;
+      }
     }
   }
 
@@ -5019,10 +5139,12 @@
   setCompactSpacing(immortalControl, "6px 8px");
 
   const immortalFeatureList = createFeatureList();
-  const immortalFeature = AUTOMATION_FEATURE_GROUPS.find(
+  const immortalFeatures = AUTOMATION_FEATURE_GROUPS.find(
     (group) => group.name === "Tiên giới",
-  ).features[0];
-  appendFeatureToggle(immortalFeature, immortalFeatureList);
+  ).features;
+  for (const feature of immortalFeatures) {
+    appendFeatureToggle(feature, immortalFeatureList);
+  }
 
   const immortalRunNowLabel = document.createElement("label");
   Object.assign(immortalRunNowLabel.style, {
@@ -5094,7 +5216,7 @@
 
   const immortalScheduleNote = document.createElement("small");
   immortalScheduleNote.textContent =
-    "Gạt bật để chạy một lượt ngay; xong sẽ tự tắt. Lịch tự động vẫn kiểm tra mỗi 30 phút.";
+    "Gạt bật để chạy một lượt ngay; xong sẽ tự tắt. Lịch Tiên giới: lò đan 30 phút/lần, uống đan 1 giờ/lần.";
   Object.assign(immortalScheduleNote.style, {
     color: "#66776b",
     fontSize: "10px",
@@ -5606,8 +5728,8 @@
     immortalControl.setAttribute("aria-pressed", String(isImmortalRunning));
     immortalControl.style.background = isImmortalRunning ? "#b42318" : "#157347";
     immortalControl.title = isImmortalRunning
-      ? "Tiên giới đang kiểm tra thông báo mỗi 30 phút; bấm để dừng riêng Tiên giới."
-      : "Bấm để bật kiểm tra Tiên giới mỗi 30 phút.";
+      ? "Tiên giới đang kiểm tra theo các tùy chọn đã bật; bấm để dừng riêng Tiên giới."
+      : "Bấm để bật lịch Tiên giới: lò đan 30 phút/lần, uống đan 1 giờ/lần.";
   }
 
   function waitForLowerWorldIdle(generation, timeoutMs = 30_000) {
@@ -5627,6 +5749,7 @@
           !isRestaurantCheckActive &&
           !isRanchCheckActive &&
           !isGameCheckActive &&
+          !isImmortalFurnaceCheckActive &&
           activeCheckGeneration === null &&
           !findVisible(".fm-visit-bar") &&
           !getVisibleDialog()
@@ -5647,8 +5770,7 @@
   async function runImmortalFurnaceNow() {
     if (
       immortalRunNowInput.disabled ||
-      isImmortalManualRun ||
-      isImmortalFurnaceCheckActive
+      isImmortalManualRun
     ) {
       return;
     }
@@ -5660,6 +5782,15 @@
     immortalRunNowKnob.style.left = "14px";
 
     try {
+      if (
+        !isFeatureEnabled("immortalFurnace") &&
+        !isFeatureEnabled("immortalDrink")
+      ) {
+        console.info("[AT-SP] Chạy ngay Tiên giới: bật ít nhất một tùy chọn Tiên giới trước.");
+        return;
+      }
+
+      console.info("[AT-SP] Chạy ngay Tiên giới: đang chờ Hạ Giới hoàn tất tác vụ hiện tại.");
       if (!(await waitForLowerWorldIdle(generation))) {
         console.warn(
           "[AT-SP] Chạy ngay Tiên giới không thể bắt đầu: tác vụ khác chưa kết thúc sau 30 giây.",
@@ -5668,6 +5799,8 @@
       }
 
       await checkImmortalFurnaceNotifications(generation, true);
+    } catch (error) {
+      console.error("[AT-SP] Lỗi khi chạy ngay Tiên giới.", error);
     } finally {
       isImmortalManualRun = false;
       immortalRunNowInput.checked = false;
