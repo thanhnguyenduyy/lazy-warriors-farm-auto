@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lazy Warriors Farm Auto
 // @namespace    local.at-sp.notification-monitor
-// @version      2.78.53
+// @version      2.78.54
 // @description  Automates farm tasks, neighbor help, games, restaurant, ranch, and mythical beast actions.
 // @match        https://at-sp.ssvhue.work/*
 // @updateURL    https://raw.githubusercontent.com/thanhnguyenduyy/lazy-warriors-farm-auto/refs/heads/main/script.meta.js
@@ -150,6 +150,7 @@
   const WEED_TASK_PATTERN = /\d+\s*luống cỏ mọc/i;
   const DRYING_RACK_TASK_PATTERN = /\d+\s*giá khô/i;
   const SILKWORM_DONE_TASK_PATTERN = /\d+\s*n[oô]ng\s+nuôi\s+tằm\s+xong/i;
+  const SILKWORM_HUNGRY_TASK_PATTERN = /\d+\s*n[oô]ng\s+tằm\s+đói/i;
   const MUSHROOM_HOUSE_DONE_TASK_PATTERN = /\d+\s*giá nhà nấm xong/i;
   const HERB_GARDEN_DONE_TASK_PATTERN = /\d+\s*luống vườn thuốc xong/i;
   const FOREST_DONE_TASK_PATTERN =
@@ -348,6 +349,7 @@
         { key: "medicine", label: "Thuốc" },
         { key: "homeWeed", label: "Nhổ cỏ vườn nhà" },
         { key: "homePest", label: "Bắt sâu vườn nhà" },
+        { key: "homeSilkwormFeed", label: "Cho tằm ăn vườn nhà" },
         { key: "forest", label: "Rừng" },
       ],
     },
@@ -604,6 +606,9 @@
     if (FRUIT_TASK_PATTERN.test(message)) return "trees";
     if (FLOWER_TASK_PATTERN.test(message)) return "flowers";
     if (WEED_TASK_PATTERN.test(message)) return "homeWeed";
+    if (SILKWORM_HUNGRY_TASK_PATTERN.test(message)) {
+      return "homeSilkwormFeed";
+    }
     if (HERB_GARDEN_DONE_TASK_PATTERN.test(message)) {
       return "medicine";
     }
@@ -1884,7 +1889,7 @@
     console.info(`[AT-SP] Đã mở ô ruộng có sâu: ${plotLabel}.`);
   }
 
-  function getAvailableHomeWeedCell(attemptedCellKeys) {
+  function getAvailableHomeTrayCell(attemptedCellKeys, descriptionPattern) {
     for (const [documentIndex, pageDocument] of getPageDocuments().entries()) {
       const trays = pageDocument.querySelectorAll(".fm-trays");
       for (const [trayIndex, tray] of Array.from(trays).entries()) {
@@ -1900,7 +1905,7 @@
             !attemptedCellKeys.has(cellKey) &&
             !cell.disabled &&
             isVisible(cell) &&
-            /cỏ mọc|nhổ\s+cỏ/i.test(description)
+            descriptionPattern.test(description)
           ) {
             return { cell, cellKey, description };
           }
@@ -1911,31 +1916,40 @@
     return null;
   }
 
-  async function handleHomeWeedTask(generation) {
+  async function handleHomeTrayTask(
+    generation,
+    featureKey,
+    actionLabel,
+    descriptionPattern,
+  ) {
     const attemptedCellKeys = new Set();
     let availableCell = await waitFor(
-      () => getAvailableHomeWeedCell(attemptedCellKeys),
+      () => getAvailableHomeTrayCell(attemptedCellKeys, descriptionPattern),
       3_000,
       generation,
     );
     if (!shouldContinue(generation)) return;
     if (!availableCell) {
-      console.warn("[AT-SP] Không tìm thấy ô cỏ mọc trong vườn nhà.");
+      console.warn(
+        `[AT-SP] Không tìm thấy ô cần ${actionLabel} trong vườn nhà.`,
+      );
       return;
     }
 
-    let removedWeeds = 0;
+    let completedCount = 0;
     while (availableCell && shouldContinue(generation)) {
       const { cell, cellKey, description } = availableCell;
       attemptedCellKeys.add(cellKey);
-      activeFeatureKey = "homeWeed";
+      const wasBlocked = cell.classList.contains("blocked");
+      activeFeatureKey = featureKey;
       cell.click();
 
       const actionUpdated = await waitFor(
         () =>
           !cell.isConnected ||
           cell.disabled ||
-          !/cỏ mọc|nhổ\s+cỏ/i.test(
+          (wasBlocked && !cell.classList.contains("blocked")) ||
+          !descriptionPattern.test(
             [
               cell.getAttribute("aria-label") ?? "",
               cell.querySelector(".fm-tray-label")?.textContent.trim() ?? "",
@@ -1946,20 +1960,25 @@
       );
       if (!shouldContinue(generation)) return;
       if (actionUpdated) {
-        removedWeeds += 1;
-        console.info(`[AT-SP] Đã nhổ cỏ vườn nhà: ${description}.`);
+        completedCount += 1;
+        console.info(`[AT-SP] Đã ${actionLabel}: ${description}.`);
       } else {
         console.warn(
-          `[AT-SP] Ô "${description}" chưa cập nhật sau khi nhổ cỏ; bỏ qua để tránh bấm lặp.`,
+          `[AT-SP] Ô "${description}" chưa cập nhật sau khi ${actionLabel}; bỏ qua để tránh bấm lặp.`,
         );
       }
 
       activeFeatureKey = null;
       if (!(await delay(ACTION_CLICK_DELAY_MS, generation))) return;
-      availableCell = getAvailableHomeWeedCell(attemptedCellKeys);
+      availableCell = getAvailableHomeTrayCell(
+        attemptedCellKeys,
+        descriptionPattern,
+      );
     }
 
-    console.info(`[AT-SP] Đã nhổ cỏ ở ${removedWeeds} ô trong vườn nhà.`);
+    console.info(
+      `[AT-SP] Đã ${actionLabel} ở ${completedCount} ô trong vườn nhà.`,
+    );
   }
 
   function getVietnamMinuteOfDay() {
@@ -2567,7 +2586,22 @@
       }
 
       if (WEED_TASK_PATTERN.test(taskName)) {
-        await handleHomeWeedTask(generation);
+        await handleHomeTrayTask(
+          generation,
+          "homeWeed",
+          "nhổ cỏ vườn nhà",
+          /cỏ mọc|nhổ\s+cỏ/i,
+        );
+        return;
+      }
+
+      if (SILKWORM_HUNGRY_TASK_PATTERN.test(taskName)) {
+        await handleHomeTrayTask(
+          generation,
+          "homeSilkwormFeed",
+          "cho tằm ăn",
+          /tằm đói|cho tằm ăn/i,
+        );
         return;
       }
 
