@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lazy Warriors Farm Auto
 // @namespace    local.at-sp.notification-monitor
-// @version      2.78.61
+// @version      2.78.63
 // @description  Automates farm tasks, neighbor help, games, restaurant, ranch, mythical beast, and immortal realm actions.
 // @match        https://at-sp.ssvhue.work/*
 // @updateURL    https://raw.githubusercontent.com/thanhnguyenduyy/lazy-warriors-farm-auto/refs/heads/main/script.meta.js
@@ -774,6 +774,12 @@
     return null;
   }
 
+  function isImmortalRealmOpen() {
+    return Boolean(
+      findVisibleMatching("nav.xs-tabs[aria-label='Tiên giới']"),
+    );
+  }
+
   function stopForInsufficientResources() {
     const toast = findVisibleMatching(
       "#toast[role='status']",
@@ -959,6 +965,7 @@
       isRanchCheckActive ||
       isGameCheckActive ||
       isImmortalFurnaceCheckActive ||
+      isImmortalRealmOpen() ||
       activeCheckGeneration !== null ||
       getVisibleDialog()
     ) {
@@ -1160,6 +1167,7 @@
       isRanchCheckActive ||
       isGameCheckActive ||
       isImmortalFurnaceCheckActive ||
+      isImmortalRealmOpen() ||
       activeCheckGeneration !== null ||
       getVisibleDialog()
     ) {
@@ -2276,6 +2284,7 @@
       isRanchCheckActive ||
       isGameCheckActive ||
       isImmortalFurnaceCheckActive ||
+      isImmortalRealmOpen() ||
       activeCheckGeneration !== null ||
       findVisible(".fm-visit-bar") ||
       getVisibleDialog()
@@ -2561,7 +2570,8 @@
       isNeighborCheckActive ||
       isRestaurantCheckActive ||
       isRanchCheckActive ||
-      isImmortalFurnaceCheckActive
+      isImmortalFurnaceCheckActive ||
+      isImmortalRealmOpen()
     ) {
       return;
     }
@@ -3589,6 +3599,7 @@
       isRestaurantCheckActive ||
       isRanchCheckActive ||
       isImmortalFurnaceCheckActive ||
+      isImmortalRealmOpen() ||
       activeCheckGeneration !== null ||
       findVisible(".fm-visit-bar") ||
       getVisibleDialog()
@@ -3701,7 +3712,8 @@
     if (
       !shouldContinue(generation) ||
       isPriorityCycleActive ||
-      isImmortalFurnaceCheckActive
+      isImmortalFurnaceCheckActive ||
+      isImmortalRealmOpen()
     ) {
       return;
     }
@@ -3720,10 +3732,10 @@
     }
   }
 
-  async function checkImmortalFurnaceNotifications(generation) {
+  async function checkImmortalFurnaceNotifications(generation, manual = false) {
     if (
       !shouldContinue(generation) ||
-      !isFeatureEnabled("immortalFurnace") ||
+      (!manual && !isFeatureEnabled("immortalFurnace")) ||
       isImmortalFurnaceCheckActive ||
       isPriorityCycleActive ||
       isNeighborCheckActive ||
@@ -3738,9 +3750,7 @@
     }
 
     isImmortalFurnaceCheckActive = true;
-    activeFeatureKey = "immortalFurnace";
-    let openedImmortalView = false;
-    let openedFurnace = false;
+    activeFeatureKey = manual ? null : "immortalFurnace";
 
     try {
       let immortalNav = findVisibleMatching(
@@ -3796,7 +3806,6 @@
           console.warn("[AT-SP] Không mở được Tiên giới để kiểm tra lò đan.");
           return;
         }
-        openedImmortalView = true;
       }
 
       const bellButton = findVisibleMatching(
@@ -3872,16 +3881,10 @@
       }
 
       openFurnaceButton.click();
-      openedFurnace = true;
       console.info("[AT-SP] Tiên giới: đã bấm Mở lò từ thông báo.");
       await delay(ACTION_CLICK_DELAY_MS, generation);
     } finally {
-      if (
-        openedImmortalView &&
-        !openedFurnace &&
-        shouldContinue(generation) &&
-        !getVisibleDialog()
-      ) {
+      if (shouldContinue(generation)) {
         const returnButton = findVisibleMatching(
           "button[aria-label='Về Hạ giới']",
           (button) => !button.disabled,
@@ -4964,30 +4967,77 @@
   ).features[0];
   appendFeatureToggle(immortalFeature, immortalFeatureList);
 
-  const immortalRunNowButton = document.createElement("button");
-  immortalRunNowButton.type = "button";
-  immortalRunNowButton.textContent = "▶ Chạy ngay";
-  immortalRunNowButton.setAttribute(
+  const immortalRunNowLabel = document.createElement("label");
+  Object.assign(immortalRunNowLabel.style, {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "3px",
+    minHeight: "21px",
+    margin: "0",
+    padding: "0",
+    color: "#425849",
+    fontSize: "11px",
+    cursor: "pointer",
+  });
+  setCompactSpacing(immortalRunNowLabel);
+  immortalRunNowLabel.append(document.createTextNode("Chạy ngay"));
+
+  const immortalRunNowInput = document.createElement("input");
+  immortalRunNowInput.type = "checkbox";
+  immortalRunNowInput.checked = false;
+  immortalRunNowInput.setAttribute("role", "switch");
+  immortalRunNowInput.setAttribute(
     "aria-label",
     "Chạy ngay một lượt kiểm tra lò đan Tiên giới",
   );
-  Object.assign(immortalRunNowButton.style, {
-    width: "100%",
-    minHeight: "30px",
+  Object.assign(immortalRunNowInput.style, {
+    position: "absolute",
+    inset: "0",
+    width: "30px",
+    height: "18px",
     margin: "0",
-    padding: "5px 8px",
-    border: "0",
-    borderRadius: "8px",
-    color: "#fff",
-    background: "#25834d",
-    font: "700 12px system-ui, sans-serif",
+    opacity: "0",
     cursor: "pointer",
   });
-  setCompactSpacing(immortalRunNowButton, "5px 8px");
+  setCompactSpacing(immortalRunNowInput);
+
+  const immortalRunNowTrack = document.createElement("span");
+  Object.assign(immortalRunNowTrack.style, {
+    position: "relative",
+    display: "block",
+    flex: "0 0 30px",
+    width: "30px",
+    height: "18px",
+    borderRadius: "999px",
+    background: "#c5cec7",
+    transition: "background 120ms ease",
+  });
+  const immortalRunNowKnob = document.createElement("span");
+  Object.assign(immortalRunNowKnob.style, {
+    position: "absolute",
+    top: "2px",
+    left: "2px",
+    width: "14px",
+    height: "14px",
+    borderRadius: "50%",
+    background: "#fff",
+    boxShadow: "0 1px 3px #0003",
+    transition: "left 120ms ease",
+    pointerEvents: "none",
+  });
+  immortalRunNowTrack.append(immortalRunNowInput, immortalRunNowKnob);
+  immortalRunNowLabel.append(immortalRunNowTrack);
+  immortalRunNowInput.addEventListener("change", () => {
+    if (!immortalRunNowInput.checked) return;
+    immortalRunNowTrack.style.background = "#25834d";
+    immortalRunNowKnob.style.left = "14px";
+    void runImmortalFurnaceNow();
+  });
 
   const immortalScheduleNote = document.createElement("small");
   immortalScheduleNote.textContent =
-    "Tự động kiểm tra mỗi 30 phút. Chạy ngay thực hiện thêm một lượt, không đổi chu kỳ.";
+    "Gạt bật để chạy một lượt ngay; xong sẽ tự tắt. Lịch tự động vẫn kiểm tra mỗi 30 phút.";
   Object.assign(immortalScheduleNote.style, {
     color: "#66776b",
     fontSize: "10px",
@@ -4997,7 +5047,7 @@
   immortalSettingsPanel.append(
     immortalSettingsHeading,
     immortalFeatureList,
-    immortalRunNowButton,
+    immortalRunNowLabel,
     immortalScheduleNote,
   );
 
@@ -5489,29 +5539,8 @@
       : "Đang dừng; bấm để bắt đầu tự động";
   }
 
-  immortalRunNowButton.addEventListener("click", async () => {
-    if (!isFeatureEnabled("immortalFurnace")) {
-      console.warn(
-        "[AT-SP] Hãy bật Thông báo lò đan trước khi chạy kiểm tra ngay.",
-      );
-      return;
-    }
-    if (
-      isImmortalFurnaceCheckActive ||
-      isPriorityCycleActive ||
-      isNeighborCheckActive ||
-      isRestaurantCheckActive ||
-      isRanchCheckActive ||
-      isGameCheckActive ||
-      activeCheckGeneration !== null ||
-      getVisibleDialog()
-    ) {
-      console.info(
-        "[AT-SP] Chưa thể chạy Tiên giới ngay vì đang có tác vụ khác; hãy thử lại.",
-      );
-      return;
-    }
-
+  async function runImmortalFurnaceNow() {
+    if (immortalRunNowInput.disabled) return;
     const wasRunning = isRunning;
     if (!wasRunning) {
       isRunning = true;
@@ -5519,23 +5548,45 @@
       updateControl();
     }
     const generation = runGeneration;
-    immortalRunNowButton.disabled = true;
-    immortalRunNowButton.textContent = "⏳ Đang kiểm tra…";
-    immortalRunNowButton.style.opacity = "0.75";
+    immortalRunNowInput.disabled = true;
+    immortalRunNowTrack.style.background = "#25834d";
+    immortalRunNowKnob.style.left = "14px";
 
     try {
-      await checkImmortalFurnaceNotifications(generation);
+      const automationIsIdle = await waitFor(
+        () =>
+          !isImmortalFurnaceCheckActive &&
+          !isPriorityCycleActive &&
+          !isNeighborCheckActive &&
+          !isRestaurantCheckActive &&
+          !isRanchCheckActive &&
+          !isGameCheckActive &&
+          activeCheckGeneration === null &&
+          !findVisible(".fm-visit-bar") &&
+          !getVisibleDialog(),
+        30_000,
+        generation,
+      );
+      if (!automationIsIdle) {
+        console.warn(
+          "[AT-SP] Chạy ngay Tiên giới không thể bắt đầu: tác vụ khác chưa kết thúc sau 30 giây.",
+        );
+        return;
+      }
+
+      await checkImmortalFurnaceNotifications(generation, true);
     } finally {
-      immortalRunNowButton.disabled = false;
-      immortalRunNowButton.textContent = "▶ Chạy ngay";
-      immortalRunNowButton.style.opacity = "1";
+      immortalRunNowInput.checked = false;
+      immortalRunNowInput.disabled = false;
+      immortalRunNowTrack.style.background = "#c5cec7";
+      immortalRunNowKnob.style.left = "2px";
       if (!wasRunning && generation === runGeneration) {
         isRunning = false;
         runGeneration += 1;
         updateControl();
       }
     }
-  });
+  }
 
   function scheduleRanchChecks(generation) {
     ranchStartTimeoutId = window.setTimeout(() => {

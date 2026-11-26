@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lazy Warriors Farm Auto
 // @namespace    local.at-sp.notification-monitor
-// @version      2.78.61
+// @version      2.78.63
 // @description  Automates farm tasks, neighbor help, games, restaurant, ranch, mythical beast, and immortal realm actions.
 // @match        https://at-sp.ssvhue.work/*
 // @updateURL    https://raw.githubusercontent.com/thanhnguyenduyy/lazy-warriors-farm-auto/refs/heads/main/script.meta.js
