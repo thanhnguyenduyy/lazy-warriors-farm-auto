@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lazy Warriors Farm Auto
 // @namespace    local.at-sp.notification-monitor
-// @version      2.78.49
+// @version      2.78.52
 // @description  Automates farm tasks, neighbor help, games, restaurant, ranch, and mythical beast actions.
 // @match        https://at-sp.ssvhue.work/*
 // @updateURL    https://raw.githubusercontent.com/thanhnguyenduyy/lazy-warriors-farm-auto/refs/heads/main/script.meta.js
@@ -346,6 +346,8 @@
         { key: "trees", label: "Cây" },
         { key: "mushrooms", label: "Nấm" },
         { key: "medicine", label: "Thuốc" },
+        { key: "homeWeed", label: "Nhổ cỏ vườn nhà" },
+        { key: "homePest", label: "Bắt sâu vườn nhà" },
         { key: "forest", label: "Rừng" },
       ],
     },
@@ -587,12 +589,8 @@
 
   function getTaskFeature(message) {
     if (HONEY_TASK_PATTERN.test(message)) return "bees";
-    if (
-      RIPE_FIELD_TASK_PATTERN.test(message) ||
-      FIELD_CARE_TASK_PATTERN.test(message)
-    ) {
-      return "field";
-    }
+    if (RIPE_FIELD_TASK_PATTERN.test(message)) return "field";
+    if (FIELD_CARE_TASK_PATTERN.test(message)) return "homePest";
     if (
       ANIMAL_TASK_PATTERN.test(message) ||
       ANIMAL_CARE_TASK_PATTERN.test(message) ||
@@ -605,10 +603,8 @@
     if (MACHINE_TASK_PATTERN.test(message)) return "workshop";
     if (FRUIT_TASK_PATTERN.test(message)) return "trees";
     if (FLOWER_TASK_PATTERN.test(message)) return "flowers";
-    if (
-      WEED_TASK_PATTERN.test(message) ||
-      HERB_GARDEN_DONE_TASK_PATTERN.test(message)
-    ) {
+    if (WEED_TASK_PATTERN.test(message)) return "homeWeed";
+    if (HERB_GARDEN_DONE_TASK_PATTERN.test(message)) {
       return "medicine";
     }
     if (FOREST_DONE_TASK_PATTERN.test(message)) return "forest";
@@ -1888,6 +1884,84 @@
     console.info(`[AT-SP] Đã mở ô ruộng có sâu: ${plotLabel}.`);
   }
 
+  function getAvailableHomeWeedCell(attemptedCellKeys) {
+    for (const [documentIndex, pageDocument] of getPageDocuments().entries()) {
+      const trays = pageDocument.querySelectorAll(".fm-trays");
+      for (const [trayIndex, tray] of Array.from(trays).entries()) {
+        const cells = Array.from(tray.querySelectorAll(".fm-tray-cell"));
+        for (const [cellIndex, cell] of cells.entries()) {
+          const description = [
+            cell.getAttribute("aria-label") ?? "",
+            cell.querySelector(".fm-tray-label")?.textContent.trim() ?? "",
+          ].join(" ");
+          const cellKey =
+            `${documentIndex}:${trayIndex}:${cellIndex}:${description}`;
+          if (
+            !attemptedCellKeys.has(cellKey) &&
+            !cell.disabled &&
+            isVisible(cell) &&
+            /cỏ mọc|nhổ\s+cỏ/i.test(description)
+          ) {
+            return { cell, cellKey, description };
+          }
+        }
+      }
+    }
+
+    return null;
+  }
+
+  async function handleHomeWeedTask(generation) {
+    const attemptedCellKeys = new Set();
+    let availableCell = await waitFor(
+      () => getAvailableHomeWeedCell(attemptedCellKeys),
+      3_000,
+      generation,
+    );
+    if (!shouldContinue(generation)) return;
+    if (!availableCell) {
+      console.warn("[AT-SP] Không tìm thấy ô cỏ mọc trong vườn nhà.");
+      return;
+    }
+
+    let removedWeeds = 0;
+    while (availableCell && shouldContinue(generation)) {
+      const { cell, cellKey, description } = availableCell;
+      attemptedCellKeys.add(cellKey);
+      activeFeatureKey = "homeWeed";
+      cell.click();
+
+      const actionUpdated = await waitFor(
+        () =>
+          !cell.isConnected ||
+          cell.disabled ||
+          !/cỏ mọc|nhổ\s+cỏ/i.test(
+            [
+              cell.getAttribute("aria-label") ?? "",
+              cell.querySelector(".fm-tray-label")?.textContent.trim() ?? "",
+            ].join(" "),
+          ),
+        2_500,
+        generation,
+      );
+      if (!shouldContinue(generation)) return;
+      if (actionUpdated) {
+        removedWeeds += 1;
+        console.info(`[AT-SP] Đã nhổ cỏ vườn nhà: ${description}.`);
+      } else {
+        console.warn(
+          `[AT-SP] Ô "${description}" chưa cập nhật sau khi nhổ cỏ; bỏ qua để tránh bấm lặp.`,
+        );
+      }
+
+      activeFeatureKey = null;
+      if (!(await delay(ACTION_CLICK_DELAY_MS, generation))) return;
+      availableCell = getAvailableHomeWeedCell(attemptedCellKeys);
+    }
+
+    console.info(`[AT-SP] Đã nhổ cỏ ở ${removedWeeds} ô trong vườn nhà.`);
+  }
+
   function getVietnamMinuteOfDay() {
     const timeParts = VIETNAM_TIME_FORMATTER.formatToParts(new Date());
     const hourPart = timeParts.find((part) => part.type === "hour");
@@ -2493,7 +2567,7 @@
       }
 
       if (WEED_TASK_PATTERN.test(taskName)) {
-        await handlePrimaryFarmActions(generation, "thuốc");
+        await handleHomeWeedTask(generation);
         return;
       }
 
@@ -4537,9 +4611,9 @@
       "z-index": "2147483647",
       display: "grid",
       "box-sizing": "border-box",
-      width: expanded ? "min(270px, calc(100vw - 72px))" : "48px",
-      height: expanded ? "auto" : "24px",
-      "max-height": expanded ? "calc(100vh - 16px)" : "24px",
+      width: expanded ? "min(270px, calc(100vw - 72px))" : "22px",
+      height: expanded ? "auto" : "22px",
+      "max-height": expanded ? "calc(100vh - 16px)" : "22px",
       gap: expanded ? "7px" : "0",
       padding: expanded ? "5px" : "0",
       border: expanded ? "1px solid #dce8dd" : "0",
@@ -4554,9 +4628,9 @@
       display: "flex",
       "box-sizing": "border-box",
       width: "100%",
-      "min-height": expanded ? "28px" : "24px",
-      height: expanded ? "28px" : "24px",
-      gap: expanded ? "6px" : "2px",
+      "min-height": expanded ? "28px" : "22px",
+      height: expanded ? "28px" : "22px",
+      gap: expanded ? "6px" : "0",
       "justify-content": expanded ? "initial" : "center",
       "border-bottom": expanded ? "1px solid #e4ece4" : "0",
     });
@@ -4570,7 +4644,7 @@
       display: expanded ? "flex" : "none",
     });
     setImportantStyles(updateLink, {
-      display: "grid",
+      display: expanded ? "grid" : "none",
       "place-items": "center",
       flex: "0 0 22px",
       width: "22px",
