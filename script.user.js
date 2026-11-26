@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lazy Warriors Farm Auto
 // @namespace    local.at-sp.notification-monitor
-// @version      2.78.52
+// @version      2.78.53
 // @description  Automates farm tasks, neighbor help, games, restaurant, ranch, and mythical beast actions.
 // @match        https://at-sp.ssvhue.work/*
 // @updateURL    https://raw.githubusercontent.com/thanhnguyenduyy/lazy-warriors-farm-auto/refs/heads/main/script.meta.js
@@ -3626,9 +3626,9 @@
   const expandButton = document.createElement("button");
   expandButton.type = "button";
   expandButton.textContent = "⭐";
-  expandButton.setAttribute("aria-label", "Thu gọn bảng điều khiển");
-  expandButton.setAttribute("aria-expanded", "true");
-  expandButton.title = "Thu gọn bảng điều khiển";
+  expandButton.setAttribute("aria-label", "Mở bảng điều khiển");
+  expandButton.setAttribute("aria-expanded", "false");
+  expandButton.title = "Mở bảng điều khiển";
   Object.assign(expandButton.style, {
     display: "grid",
     placeItems: "center",
@@ -4815,7 +4815,7 @@
       expandButton.style.setProperty("opacity", "0.28", "important");
     }
   });
-  applyPanelAppearance(true);
+  applyPanelAppearance(false);
   panelContent.append(settingsTabs, settingsPanels);
   controlPanel.append(panelHeader, panelContent);
 
