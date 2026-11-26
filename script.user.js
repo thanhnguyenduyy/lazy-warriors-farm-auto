@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lazy Warriors Farm Auto
 // @namespace    local.at-sp.notification-monitor
-// @version      2.78.56
+// @version      2.78.59
 // @description  Automates farm tasks, neighbor help, games, restaurant, ranch, and mythical beast actions.
 // @match        https://at-sp.ssvhue.work/*
 // @updateURL    https://raw.githubusercontent.com/thanhnguyenduyy/lazy-warriors-farm-auto/refs/heads/main/script.meta.js
@@ -331,6 +331,20 @@
   const CONTROL_POSITION_STORAGE_KEY = "at-sp.control-position-v3";
   const FEATURE_TOGGLE_STORAGE_PREFIX = "at-sp.feature.";
   const AUTOMATION_SCHEDULE_TOGGLE_KEY = "automationSchedule";
+  const NEIGHBOR_HELP_ALLOWLIST_TOGGLE_KEY = "neighborHelpAllowlist";
+  const NEIGHBOR_HELP_ALLOWLIST = new Set(
+    [
+      "NhanVP",
+      "HuyHVQ",
+      "ThangNH",
+      "KhanhLQ",
+      "HoanPV",
+      "YchiTQ",
+      "SangTT",
+      "ThangPV",
+      "QuynhTTN",
+    ].map((name) => name.toLocaleLowerCase("vi-VN")),
+  );
   const GAME_GEMINI_KEY_STORAGE_KEY = "at-sp.games.gemini-key";
   const GAME_GEMINI_MODEL_FALLBACKS = [
     "gemini-2.5-flash",
@@ -388,6 +402,10 @@
         { key: "neighborCompost", label: "Ủ phân giúp" },
         { key: "neighborSilkworm", label: "Cho tằm ăn" },
         { key: "neighborFeed", label: "Cho thú ăn" },
+        {
+          key: NEIGHBOR_HELP_ALLOWLIST_TOGGLE_KEY,
+          label: "Only help Thâu Thiên Môn",
+        },
       ],
     },
   ];
@@ -547,9 +565,13 @@
 
   function readStoredToggle(
     key,
-    defaultValue = !["mushrooms", "neighborSilkworm", "games", "villagers"].includes(
-      key,
-    ),
+    defaultValue = ![
+      "mushrooms",
+      "neighborSilkworm",
+      "games",
+      "villagers",
+      NEIGHBOR_HELP_ALLOWLIST_TOGGLE_KEY,
+    ].includes(key),
   ) {
     try {
       const value = window.localStorage.getItem(
@@ -2232,8 +2254,10 @@
   async function checkNeighborHelp(generation) {
     if (
       !shouldContinueNeighborHelp(generation) ||
-      !AUTOMATION_FEATURE_GROUPS.at(-1).features.some((feature) =>
-        isFeatureEnabled(feature.key),
+      !AUTOMATION_FEATURE_GROUPS.at(-1).features.some(
+        (feature) =>
+          feature.key !== NEIGHBOR_HELP_ALLOWLIST_TOGGLE_KEY &&
+          isFeatureEnabled(feature.key),
       ) ||
       isNeighborCheckActive ||
       isRestaurantCheckActive ||
@@ -2305,7 +2329,13 @@
             helpCount > 0;
           const needsFeedCheck =
             isFeatureEnabled("neighborFeed") && Boolean(name);
+          const isAllowedNeighbor =
+            !isFeatureEnabled(NEIGHBOR_HELP_ALLOWLIST_TOGGLE_KEY) ||
+            NEIGHBOR_HELP_ALLOWLIST.has(
+              name.trim().toLocaleLowerCase("vi-VN"),
+            );
           return (
+            isAllowedNeighbor &&
             (needsHelp || needsFeedCheck) &&
             (!name || !neighborRetryAfter.has(name))
           );
