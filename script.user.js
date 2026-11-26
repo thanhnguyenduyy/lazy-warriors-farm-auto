@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lazy Warriors Farm Auto
 // @namespace    local.at-sp.notification-monitor
-// @version      2.78.54
+// @version      2.78.55
 // @description  Automates farm tasks, neighbor help, games, restaurant, ranch, and mythical beast actions.
 // @match        https://at-sp.ssvhue.work/*
 // @updateURL    https://raw.githubusercontent.com/thanhnguyenduyy/lazy-warriors-farm-auto/refs/heads/main/script.meta.js
@@ -347,9 +347,9 @@
         { key: "trees", label: "Cây" },
         { key: "mushrooms", label: "Nấm" },
         { key: "medicine", label: "Thuốc" },
-        { key: "homeWeed", label: "Nhổ cỏ vườn nhà" },
-        { key: "homePest", label: "Bắt sâu vườn nhà" },
-        { key: "homeSilkwormFeed", label: "Cho tằm ăn vườn nhà" },
+        { key: "homeWeed", label: "Nhổ cỏ" },
+        { key: "homePest", label: "Bắt Sâu" },
+        { key: "homeSilkwormFeed", label: "Cho Tằm ăn" },
         { key: "forest", label: "Rừng" },
       ],
     },
