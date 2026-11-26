@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lazy Warriors Farm Auto
 // @namespace    local.at-sp.notification-monitor
-// @version      2.78.63
+// @version      2.78.64
 // @description  Automates farm tasks, neighbor help, games, restaurant, ranch, mythical beast, and immortal realm actions.
 // @match        https://at-sp.ssvhue.work/*
 // @updateURL    https://raw.githubusercontent.com/thanhnguyenduyy/lazy-warriors-farm-auto/refs/heads/main/script.meta.js
@@ -3756,56 +3756,69 @@
       let immortalNav = findVisibleMatching(
         "nav.xs-tabs[aria-label='Tiên giới']",
       );
-      if (!immortalNav) {
-        const homeTab = findVisibleMatching(
-          "button.tab[data-farm='home']",
-          (tab) => isVisible(tab),
+      if (immortalNav) {
+        const returnButton = findVisibleMatching(
+          "button[aria-label='Về Hạ giới']",
+          (button) => !button.disabled,
         );
-        if (!homeTab) {
-          console.warn("[AT-SP] Không tìm thấy tab Vườn để vào Tiên giới.");
+        if (!returnButton) {
+          console.warn("[AT-SP] Không tìm thấy nút Về Hạ giới trước khi kiểm tra.");
           return;
         }
-
-        if (
-          !homeTab.classList.contains("active") &&
-          homeTab.getAttribute("aria-selected") !== "true"
-        ) {
-          homeTab.click();
-          const homeIsActive = await waitFor(
-            () =>
-              findVisibleMatching(
-                "button.tab[data-farm='home']",
-                (tab) =>
-                  tab.classList.contains("active") ||
-                  tab.getAttribute("aria-selected") === "true",
-              ),
-            3_000,
-            generation,
-          );
-          if (!homeIsActive || !shouldContinue(generation)) return;
-        }
-
-        const enterImmortalButton = findVisibleMatching(
-          "button.btn.fh-cta.fx-up",
-          (button) =>
-            !button.disabled &&
-            button.textContent.replace(/\s+/g, " ").includes("Lên Tiên giới"),
-        );
-        if (!enterImmortalButton) {
-          console.warn("[AT-SP] Không tìm thấy nút Lên Tiên giới trong Vườn.");
-          return;
-        }
-
-        enterImmortalButton.click();
-        immortalNav = await waitFor(
-          () => findVisibleMatching("nav.xs-tabs[aria-label='Tiên giới']"),
+        returnButton.click();
+        const homeTabAvailable = await waitFor(
+          () => findVisibleMatching("button.tab[data-farm='home']"),
           5_000,
           generation,
         );
-        if (!immortalNav || !shouldContinue(generation)) {
-          console.warn("[AT-SP] Không mở được Tiên giới để kiểm tra lò đan.");
-          return;
-        }
+        if (!homeTabAvailable || !shouldContinue(generation)) return;
+      }
+
+      const homeTab = findVisibleMatching("button.tab[data-farm='home']");
+      if (!homeTab) {
+        console.warn("[AT-SP] Không tìm thấy tab Vườn để vào Tiên giới.");
+        return;
+      }
+      homeTab.click();
+
+      const homeIsActive = await waitFor(
+        () =>
+          findVisibleMatching(
+            "button.tab[data-farm='home']",
+            (tab) =>
+              tab.classList.contains("active") ||
+              tab.getAttribute("aria-selected") === "true",
+          ),
+        3_000,
+        generation,
+      );
+      if (!homeIsActive || !shouldContinue(generation)) return;
+
+      const enterImmortalButton = await waitFor(
+        () =>
+          findVisibleMatching(
+            "button.btn.fh-cta.fx-up",
+            (button) =>
+              !button.disabled &&
+              button.textContent.replace(/\s+/g, " ").includes("Lên Tiên giới"),
+          ),
+        5_000,
+        generation,
+      );
+      if (!enterImmortalButton || !shouldContinue(generation)) {
+        console.warn("[AT-SP] Không tìm thấy nút Lên Tiên giới trong Vườn.");
+        return;
+      }
+
+      enterImmortalButton.click();
+      immortalNav = await waitFor(
+        () => findVisibleMatching("nav.xs-tabs[aria-label='Tiên giới']"),
+        5_000,
+        generation,
+      );
+      if (!immortalNav || !shouldContinue(generation)) {
+        console.warn("[AT-SP] Không mở được Tiên giới để kiểm tra lò đan.");
+        return;
       }
 
       const bellButton = findVisibleMatching(
